@@ -12,24 +12,45 @@ func trigerNoRow() error {
 	return sql.ErrNoRows
 }
 
-type NoSuchUser struct {
-	Sql  string
-	Args []interface{}
+type CommonError struct {
+	CauseErr error
+	Sql      string
+	Args     []interface{}
 }
 
-type OtherError struct {
-	Sql  string
-	Args []interface{}
+func (e CommonError) Error() string {
+	return fmt.Sprintf("exec sql error: sql %s ; args %v : %+v", e.Sql, e.Args, e.CauseErr)
 }
+
+func (e CommonError) Cause() error {
+	return e.CauseErr
+}
+
+func (e CommonError) Unwrap() error {
+	return e.CauseErr
+}
+
+func newCommonError(err error, sql string, args ...interface{}) error {
+	return CommonError{
+		CauseErr: err,
+		Sql:      sql,
+		Args:     args,
+	}
+}
+func newNoSuchUser(err error, sql string, args ...interface{}) error {
+	return NoSuchUser{
+		CommonError{
+			CauseErr: err,
+			Sql:      sql,
+			Args:     args,
+		},
+	}
+}
+
+type NoSuchUser struct{ CommonError }
 
 func (e NoSuchUser) Error() string {
-	return fmt.Sprintf("can not find user: sql %s ; args %v ", e.Sql, e.Args)
-}
-func newNoSuchUser(sql string, args ...interface{}) error {
-	return NoSuchUser{
-		Sql:  sql,
-		Args: args,
-	}
+	return fmt.Sprintf("can not find user: sql %s ; args %v : %+v", e.Sql, e.Args, e.CauseErr)
 }
 
 // DaoFindUserByID
@@ -38,23 +59,23 @@ func DaoFindUserByID(userID int) error {
 	if err := trigerNoRow(); err != nil {
 
 		if errors.Cause(err) == sql.ErrNoRows {
-			return errors.WithStack(newNoSuchUser(s, userID))
+			return errors.WithStack(newNoSuchUser(err, s, userID))
 		} else {
-			return errors.Wrap(err, "find user error")
+			return errors.WithStack(newCommonError(err, s, userID))
 		}
 
 	}
 	return nil
 }
 
-// DaoFindUser
+// DaoFindUserByName
 func DaoFindUserByName(name string) error {
 	s := "select * from user where username = ?"
 	if err := trigerNoRow(); err != nil {
 		if errors.Cause(err) == sql.ErrNoRows {
-			return errors.WithStack(newNoSuchUser(s, name))
+			return errors.WithStack(newNoSuchUser(err, s, name))
 		} else {
-			return errors.Wrap(err, "find user error")
+			return errors.WithStack(newCommonError(err, s, name))
 		}
 	}
 	return nil
@@ -76,7 +97,6 @@ func main() {
 		} else {
 			fmt.Printf("original error: %+v\n", errors.Cause(err))
 			fmt.Printf("stack trace:\n%+v\n", err)
-
 		}
 	}
 }
